@@ -1,0 +1,89 @@
+function objKeys = saveToDatabase(obj)
+    %SAVETODATABASE Saves each Hardware through a database connection.
+    %
+    %   If there is a duplicate object, this method will return the key of the
+    %   original record instead of creating a new object in the Database.
+    %
+    %   The SqlClient must be connected.
+    %
+    %Returns:
+    %   objKeys (int32): Table Key for the stored Hardware.
+    %
+    %See also: bose.cnc.meas.Hardware,
+    %   bose.cnc.meas.Hardware.loadFromDatabase
+
+    % Alex Coleman
+    % $Id$
+
+    idHeader = 'bose:cnc:meas:Hardware:saveToDatabase:';
+
+    sqlClient = bose.cnc.datastore.SqlClient.start;
+
+    storedProcedureName = sprintf('%s.WH.GetHardwareKey', sqlClient.DatabaseName);
+
+    % Loop over every Hardware given
+    objKeys = int32(zeros(numel(obj), 1));
+
+    for indObj = 1:numel(obj)
+
+        if ~obj(indObj).isValid
+            warning( ...
+                [idHeader 'InvalidHardware'], ...
+                [ ...
+                    'This Hardware (%d of %d) was invalid and will not be ' ...
+                    'uploaded to the database.' ...
+                ], ...
+                indObj, ...
+                numel(obj) ...
+            );
+            objKeys(indObj) = int32(0);
+            continue
+        end
+
+        % Generate ConnectionParameters string
+        if isempty(obj(indObj).ConnectionParameters)
+            connectionParametersString = "NULL";
+        else
+            connectionParametersString = "'" + strjoin(obj(indObj).ConnectionParameters, ',') + "'";
+        end
+
+        fetchString = sprintf( ...
+            "EXECUTE %s '%s', %s, '%s', '%s', '%s', %.0f, %.0f, %.0f, %.0f, '%s'", ...
+            storedProcedureName, ...
+            obj(indObj).CalibrationMode, ...
+            connectionParametersString, ...
+            obj(indObj).DeviceModel, ...
+            obj(indObj).DeviceName, ...
+            obj(indObj).Name, ...
+            obj(indObj).NumAnalogInputs, ...
+            obj(indObj).NumAnalogOutputs, ...
+            obj(indObj).NumDigitalInputs, ...
+            obj(indObj).NumDigitalOutputs, ...
+            obj(indObj).Type ...
+        );
+        %TODO(ALEX): Once we know what errIDs typically pop out of the DB, we can catch them and continue.
+        try
+            objKeyTable = sqlClient.fetch(fetchString);
+            objKey = int32(objKeyTable.HardwareKey);
+        catch ME
+
+            if strcmp(ME.identifier, 'database:database:JDBCDriverError')
+                warning( ...
+                    [idHeader 'UploadFailed'], ...
+                    'This Hardware (%d of %d) failed to be uploaded. %s', ...
+                    indObj, ...
+                    numel(obj), ...
+                    sqlClient.Message ...
+                );
+                objKey = int32(0);
+            else
+                rethrow(ME);
+            end
+
+        end
+
+        objKeys(indObj) = objKey;
+        %TODO(ALEX): If an object fails to upload or is invalid, its key will be zero in this array.
+    end % For every object to upload
+
+end % saveToDatabase
